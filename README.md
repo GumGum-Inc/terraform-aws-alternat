@@ -1,4 +1,4 @@
-# alterNAT
+# alterNATs
 
 NAT Gateways are dead. Long live NAT instances!
 
