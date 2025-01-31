@@ -1,0 +1,23 @@
+# This is the file that defines the CI/CD Pipeline for the application in Github actions
+name: alternat_cicd_pipeline
+permissions:
+  id-token: write
+  contents: read
+on:
+  push:
+    paths:
+      - 'functions/replace-route/**'
+      - 'terragrunt/terragrunt/alternat/**'
+jobs:
+  docker-build:
+    uses: GumGum-Inc/reusable-workflow-ci-docker-build/.github/workflows/ci-docker-build.yaml@v1
+    with:
+      trivy_output_code: '0'
+      email_addresses: ops@gumgum.com
+      email_body: ${{ vars.EMAIL_NOTIFICATION_BODY }}
+      email_subject: ${{ vars.EMAIL_NOTIFICATION_SUBJECT }}
+      ecr_repository_name: oss/terraform-aws-alternat
+      dockerfile_path: .
+      dockerfile_name: Dockerfile
+    secrets:
+      EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
