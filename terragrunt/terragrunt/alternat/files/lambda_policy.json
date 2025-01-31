@@ -1,0 +1,23 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "VisualEditor0",
+      "Effect": "Allow",
+      "Action": [
+        "secretsmanager:GetRandomPassword",
+        "secretsmanager:ListSecrets"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "VisualEditor1",
+      "Effect": "Allow",
+      "Action": "secretsmanager:*",
+      "Resource": [ 
+        "arn:aws:secretsmanager:us-east-1:384127515584:secret:Offboarding_Secrets-nfkGJ4",
+        "arn:aws:secretsmanager:us-east-1:384127515584:secret:Offboarding_Secrets_Encoded-xwlH9O"
+      ]
+    }
+  ]
+}
