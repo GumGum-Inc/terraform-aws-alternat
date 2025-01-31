@@ -1,0 +1,60 @@
+# This is the file that defines the CI/CD Pipeline for the application in Github actions
+name: alternat_cicd_pipeline
+permissions:
+  id-token: write
+  contents: read
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'functions/replace-route/**'
+      - 'terragrunt/terragrunt/alternat/**'
+jobs:
+  docker-build:
+    uses: GumGum-Inc/reusable-workflow-ci-docker-build/.github/workflows/ci-docker-build.yaml@v1
+    with:
+      trivy_output_code: '0'
+      email_addresses: ops@gumgum.com
+      email_body: ${{ vars.EMAIL_NOTIFICATION_BODY }}
+      email_subject: ${{ vars.EMAIL_NOTIFICATION_SUBJECT }}
+      ecr_repository_name: oss/terraform-aws-alternat
+      dockerfile_path: .
+      dockerfile_name: Dockerfile
+    secrets:
+      EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+  # terragrunt-deploy-dev:
+  #   if: github.ref_type == 'branch' && !contains(fromJSON('["master"]'), github.ref_name)
+  #   needs: docker-build
+  #   uses: GumGum-Inc/reusable-workflow-cd-terragrunt-deploy/.github/workflows/cd-terragrunt-deploy.yaml@v1
+  #   with:
+  #     environment: development
+  #     terraform_version: '1.5.7'
+  #     terragrunt_version: '0.50.14'
+  #     terragrunt_path: terragrunt/terragrunt/jira_offboarding/stack/dev
+  #     terragrunt_plan_args: -var=lambda_image_tag=${{ needs.docker-build.outputs.image_tag }}
+  #     terragrunt_apply_args: -var=lambda_image_tag=${{ needs.docker-build.outputs.image_tag }}      
+  #     email_addresses: ops@gumgum.com
+  #     email_body: ${{ vars.EMAIL_NOTIFICATION_BODY }}
+  #     email_subject: ${{ vars.EMAIL_NOTIFICATION_SUBJECT }}
+  #   secrets:
+  #     GH_TOKEN: ${{ secrets.GH_TOKEN }}
+  #     EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+  #     OPS_PRIVATE_SSH_KEY: ${{ secrets.OPS_PRIVATE_SSH_KEY }}
+  # terragrunt-deploy-prod:
+  #   if: github.ref_type == 'tag'
+  #   needs: docker-build
+  #   uses: GumGum-Inc/reusable-workflow-cd-terragrunt-deploy/.github/workflows/cd-terragrunt-deploy.yaml@v1
+  #   with:
+  #     environment: production
+  #     terraform_version: '1.5.7'
+  #     terragrunt_version: '0.50.14'
+  #     terragrunt_path: terragrunt/terragrunt/jira_offboarding/stack/prod
+  #     terragrunt_plan_args: -var=lambda_image_uri=${{ needs.docker-build.outputs.image_uri }}
+  #     terragrunt_apply_args: -var=lambda_image_uri=${{ needs.docker-build.outputs.image_uri }}      
+  #     email_addresses: ops@gumgum.com
+  #     email_body: ${{ vars.EMAIL_NOTIFICATION_BODY }}
+  #     email_subject: ${{ vars.EMAIL_NOTIFICATION_SUBJECT }}
+  #   secrets:
+  #     GH_TOKEN: ${{ secrets.GH_TOKEN }}
+  #     EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+  #     OPS_PRIVATE_SSH_KEY: ${{ secrets.OPS_PRIVATE_SSH_KEY }}
