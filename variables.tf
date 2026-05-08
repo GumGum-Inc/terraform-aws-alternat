@@ -67,6 +67,12 @@ variable "enable_ssm" {
   default     = true
 }
 
+variable "enable_nat_restore" {
+  description = "Whether to enable NAT restore functionality."
+  type        = bool
+  default     = false
+}
+
 variable "ingress_security_group_ids" {
   description = "A list of security group IDs that are allowed by the NAT instance."
   type        = list(string)
@@ -167,6 +173,16 @@ variable "nat_instance_eip_ids" {
   default     = []
 }
 
+variable "fallback_ngw_eip_allocation_ids" {
+  type        = map(string)
+  default     = {}
+  description = "Explicitly specified allocation_ids for fallback NAT Gateway by AZ (e.g., { eu-west-1a = \"eipalloc-0123456789abcdef0\" }). If specified for an AZ, the EIP will not be created automatically."
+  validation {
+    condition     = alltrue([for v in values(var.fallback_ngw_eip_allocation_ids) : can(regex("^eipalloc-[0-9a-f]+$", v))])
+    error_message = "Each allocation_id must be in the format eipalloc-xxxxxxxxxxxxxxx (hex)."
+  }
+}
+
 variable "nat_instance_user_data_pre_install" {
   description = "Pre-install shell script to run at boot before configuring alternat."
   type        = string
@@ -177,6 +193,12 @@ variable "nat_instance_user_data_post_install" {
   description = "Post-install shell script to run at boot after configuring alternat."
   type        = string
   default     = ""
+}
+
+variable "prevent_destroy_eips" {
+  description = "Prevents accidental destruction of EIPs by setting `prevent_destroy=true`"
+  type        = bool
+  default     = false
 }
 
 variable "tags" {
@@ -270,4 +292,28 @@ variable "lambda_layer_arns" {
   type        = list(string)
   description = "List of Lambda layers ARN that will be added to functions"
   default     = null
+}
+
+variable "enable_cloudwatch_agent" {
+  description = "Whether to enable CloudWatch Agent on the NAT instances."
+  type        = bool
+  default     = false
+}
+
+variable "cloudwatch_namespace" {
+  description = "The name of the CloudWatch namespace for the CloudWatch Agent"
+  type        = string
+  default     = "alterNAT"
+}
+
+variable "cloudwatch_interfaces" {
+  description = "List of NAT instance interfaces that should be monitored by the CloudWatch Agent"
+  type        = list(string)
+  default     = ["ens5", "ens6"]
+}
+
+variable "enable_launch_script_lifecycle_hook" {
+  description = "Whether to enable the ASG lifecycle hook for the launch script."
+  type        = bool
+  default     = false
 }

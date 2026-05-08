@@ -8,7 +8,7 @@ locals {
   lambda_runtime   = "python3.12"
 }
 
-data "archive_file" "lambda" {
+resource "archive_file" "lambda" {
   count       = var.lambda_package_type == "Zip" ? 1 : 0
   type        = "zip"
   source_dir  = "${path.module}/functions/replace-route"
@@ -31,8 +31,8 @@ resource "aws_lambda_function" "alternat_autoscaling_hook" {
 
   runtime          = var.lambda_package_type == "Zip" ? local.lambda_runtime : null
   handler          = var.lambda_package_type == "Zip" ? var.lambda_handlers.alternat_autoscaling_hook : null
-  filename         = var.lambda_package_type == "Zip" ? data.archive_file.lambda[0].output_path : null
-  source_code_hash = var.lambda_package_type == "Zip" ? data.archive_file.lambda[0].output_base64sha256 : null
+  filename         = var.lambda_package_type == "Zip" ? archive_file.lambda[0].output_path : null
+  source_code_hash = var.lambda_package_type == "Zip" ? archive_file.lambda[0].output_base64sha256 : null
 
   environment {
     variables = merge(
@@ -88,7 +88,18 @@ data "aws_iam_policy_document" "alternat_lambda_permissions" {
     ]
     resources = [
       for route_table in local.all_route_tables
-      : "arn:aws:ec2:${data.aws_region.current.name}:${data.aws_caller_identity.current.id}:route-table/${route_table}"
+      : "arn:aws:ec2:${data.aws_region.current.id}:${data.aws_caller_identity.current.id}:route-table/${route_table}"
+    ]
+  }
+
+  statement {
+    sid    = "alterNATASGLifecyclePermissions"
+    effect = "Allow"
+    actions = [
+      "autoscaling:CompleteLifecycleAction",
+    ]
+    resources = [
+      "arn:aws:autoscaling:${data.aws_region.current.id}:${data.aws_caller_identity.current.account_id}:autoScalingGroup:*:autoScalingGroupName/${var.nat_instance_name_prefix}*",
     ]
   }
 }
@@ -141,8 +152,8 @@ resource "aws_lambda_function" "alternat_connectivity_tester" {
 
   runtime          = var.lambda_package_type == "Zip" ? local.lambda_runtime : null
   handler          = var.lambda_package_type == "Zip" ? var.lambda_handlers.connectivity_tester : null
-  filename         = var.lambda_package_type == "Zip" ? data.archive_file.lambda[0].output_path : null
-  source_code_hash = var.lambda_package_type == "Zip" ? data.archive_file.lambda[0].output_base64sha256 : null
+  filename         = var.lambda_package_type == "Zip" ? archive_file.lambda[0].output_path : null
+  source_code_hash = var.lambda_package_type == "Zip" ? archive_file.lambda[0].output_base64sha256 : null
 
   dynamic "image_config" {
     for_each = var.lambda_package_type == "Image" ? [var.lambda_handlers.connectivity_tester] : []
@@ -158,7 +169,9 @@ resource "aws_lambda_function" "alternat_connectivity_tester" {
         ROUTE_TABLE_IDS_CSV = join(",", each.value.route_table_ids),
         PUBLIC_SUBNET_ID    = each.value.public_subnet_id
         CHECK_URLS          = join(",", var.connectivity_test_check_urls)
-        NAT_GATEWAY_ID      = var.nat_gateway_id,
+        NAT_GATEWAY_ID      = var.nat_gateway_id
+        NAT_ASG_NAME        = aws_autoscaling_group.nat_instance[each.key].name
+        ENABLE_NAT_RESTORE  = var.enable_nat_restore
       },
       local.has_ipv6_env_var,
       var.lambda_environment_variables,
@@ -213,4 +226,55 @@ resource "aws_lambda_permission" "allow_cloudwatch_to_call_connectivity_tester" 
   function_name = aws_lambda_function.alternat_connectivity_tester[each.key].function_name
   principal     = "events.amazonaws.com"
   source_arn    = aws_cloudwatch_event_rule.every_minute.arn
+}
+
+data "aws_iam_policy_document" "lambda_ssm_send_command_document" {
+  statement {
+    sid    = "AllowSSMSendCommandOnDocument"
+    effect = "Allow"
+
+    actions = [
+      "ssm:SendCommand",
+    ]
+
+    resources = [
+      "arn:aws:ssm:${data.aws_region.current.id}::document/AWS-RunShellScript",
+    ]
+  }
+  statement {
+    sid    = "AllowSSMSendCommandOnInstances"
+    effect = "Allow"
+
+    actions = [
+      "ssm:SendCommand",
+    ]
+
+    resources = [
+      "arn:aws:ec2:${data.aws_region.current.id}:${data.aws_caller_identity.current.id}:instance/*"
+    ]
+    condition {
+      test     = "StringEquals"
+      variable = "aws:ResourceTag/alterNATInstance"
+      values = [
+        "true"
+      ]
+    }
+  }
+  statement {
+    sid    = "AllowSSMAndEC2ReadOps"
+    effect = "Allow"
+
+    actions = [
+      "ssm:GetCommandInvocation",
+      "ec2:DescribeInstances"
+    ]
+    resources = ["*"]
+  }
+}
+
+resource "aws_iam_role_policy" "lambda_ssm_send_command_policy" {
+  count  = var.enable_nat_restore ? 1 : 0
+  name   = "AllowLambdaToSendSSMCommand"
+  role   = aws_iam_role.nat_lambda_role.id
+  policy = data.aws_iam_policy_document.lambda_ssm_send_command_document.json
 }

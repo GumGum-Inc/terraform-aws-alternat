@@ -34,11 +34,12 @@ Features:
 
 * Self-provisioned NAT instances in Auto Scaling Groups
 * Standby NAT Gateways with health checks and automated failover, facilitated by a Lambda function
-* Vanilla Amazon Linux 2023 AMI (no AMI management requirement)
+* Failback to the NAT instance upon recovery (optional)
+* Always uses the latest vanilla Amazon Linux 2023 AMI (no AMI management requirement)
 * Optional use of SSM for connecting to the NAT instances
+* Optional use of CloudWatch Agent to monitor the NAT instances
 * Max instance lifetimes (no long-lived instances!) with automated failover
 * A Terraform module to set everything up
-* Compatibility with the default naming convention used by the open source [terraform-aws-vpc Terraform module](https://github.com/terraform-aws-modules/terraform-aws-vpc/blob/master/variables.tf)
 
 Read on to learn more about alterNAT.
 
@@ -78,6 +79,25 @@ When a NAT instance in any of the zonal ASGs is terminated, the lifecycle hook p
 The replace-route function also acts as a health check. Every minute, in the private subnet of each availability zone, the function checks that connectivity to the Internet works by requesting https://www.example.com and, if that fails, https://www.google.com. If the request succeeds, the function exits. If both requests fail, the NAT instance is presumably borked, and the function updates the route to point at the standby NAT gateway.
 
 In the event that a NAT instance is unavailable, the function would have no route to the AWS EC2 API to perform the necessary steps to update the route table. This is mitigated by the use of an [interface VPC endpoint](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/interface-vpc-endpoints.html) to EC2.
+
+### NAT instance recovery
+
+If the route has previously been updated to use the standby NAT gateway due to a health check failure, the replace-route function can optionally attempt to detect recovery of the NAT instance. This allows the system to automatically recover and return to the preferred, cost-effective path of the NAT instance as soon as it is healthy.
+
+This feature is disabled by default. To enable it, set `enable_nat_restore=true` and `enable_ssm=true`.
+
+How it works:
+
+0. Assume that the connectivity check has failed and the route was updated to use the NAT Gateway.
+1. During the next connectivity check, attempt to restore the NAT instance
+2. Send an SSM command to `curl` the connectivity check URLs
+3. If the connection is successful, check the NAT configuration
+4. If the configuration is correct, update the route to use the NAT instance.
+5. Continue with regular connectivity checks through the NAT instance.
+
+Note that the route recovery feature does _not_ attempt to remediate any configuration issue on the instance; the instance remains immutable.
+
+Also, under certain edge cases, this can potentially lead to flapping between NAT Gateway => NAT Instance => NAT Gateway => NAT Instance. Imagine a scenario where `curl` commands succeed from the NAT instance, and it appears to be configured correctly, so the NAT instance route is restored. But in actuality, a missing security group rule prevents traffic from reaching the NAT instance. During every connectivity check interval, the Lambda will update the route to use the instance since it appears healthy, but then the regular connectivity checks fail due to the missing security group rule, so the Lambda will immediately replace the route again pointing at NAT Gateway. This can happen until the security group rule is fixed.
 
 ## Drawbacks
 
@@ -209,6 +229,26 @@ If you are using the open source terraform-aws-vpc module, you can set `nat_gate
 
 AlterNATively, you can remove the NAT Gateways and their EIPs from your existing configuration and then `terraform import` them to allow alterNAT to manage them.
 
+#### Providing explicit Elastic IPs for fallback NAT Gateways
+
+You can optionally supply your own Elastic IP allocation IDs for the fallback NAT Gateways instead of letting alterNAT create them automatically.
+
+This is useful if you already have pre-allocated EIPs (for example, allow-listed IPs) that must be reused by the fallback NAT Gateways.
+
+```hcl
+fallback_ngw_eip_allocation_ids = {
+  "eu-west-1a" = "eipalloc-0123456789abcdef0"
+  "eu-west-1b" = "eipalloc-1111222233334444"
+}
+```
+When an allocation ID is provided for an Availability Zone:
+- The module will not create a new aws_eip resource for that zone.
+- The corresponding NAT Gateway will use the specified allocation ID.
+- All other zones (without explicit IDs) will behave as before — alterNAT will create EIPs automatically or reuse protected ones.
+
+If you provide explicit EIPs for all zones, no new aws_eip.nat_gateway_eips resources will be created.
+
+
 ### Other Considerations
 
 - Read [the Amazon EC2 instance network bandwidth page](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-instance-network-bandwidth.html) carefully. In particular:
@@ -223,9 +263,9 @@ AlterNATively, you can remove the NAT Gateways and their EIPs from your existing
 
 - [SSM Session Manager](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager.html) is enabled by default. To view NAT connections on an instance, use sessions manager to connect, then run `sudo cat /proc/net/nf_conntrack`. Disable SSM by setting `enable_ssm=false`.
 
-- We intentionally use `most_recent=true` for the Amazon Linux 2 AMI. This helps to ensure that the latest AMI is used in the ASG launch template. If a new AMI is available when you run `terraform apply`, the launch template will be updated with the latest AMI. The new AMI will be launched automatically when the maximum instance lifetime is reached.
+- A new instance will be launched automatically when the maximum instance lifetime is reached using the latest AMI.
 
-- Most of the time, except when the instance is actively being replaces, NAT traffic should be routed through the NAT instance and NOT through the NAT Gateway. You should monitor your logs for the text "Failed connectivity tests! Replacing route" and alert when this occurs as you may need to manually intervene to resolve a problem with the NAT instances.
+- Most of the time, except when the instance is actively being replaced, NAT traffic should be routed through the NAT instance and NOT through the NAT Gateway. You can monitor the logs for the text "Failed connectivity tests! Replacing route" to be alerted to NAT instance failures.
 
 - There are four Elastic IP addresses for the NAT instances and four for the NAT Gateways. Be sure to add all eight addresses to any external allow lists if necessary.
 
@@ -245,6 +285,14 @@ AlterNATively, you can remove the NAT Gateways and their EIPs from your existing
     create_nat_gateways = false
     nat_gateway_id      = "nat-..."
   ```
+
+- If your EIPs are critical, for example if they have been allow listed by third parties, use `prevent_destroy_eips=true` to prevent accidental deletion.
+
+- Monitoring by the [CloudWatch Agent](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/Install-CloudWatch-Agent.html) is disabled by default. Enable by setting `enable_cloudwatch_agent=true`. Note that you will incur custom metric charges:
+
+  > Metrics collected by the CloudWatch agent are billed as custom metrics. For more information about CloudWatch metrics pricing, see [Amazon CloudWatch Pricing](https://aws.amazon.com/cloudwatch/pricing/).
+
+- There is a small risk that the NAT instance launch will fail due to transient errors. With `enable_launch_script_lifecycle_hook` set to true the ASG waits ~15 minutes for the script to complete successfully and starts over with a new instance if necessary.
 
 ## Contributing
 
