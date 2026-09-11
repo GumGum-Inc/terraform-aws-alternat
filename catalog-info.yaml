@@ -1,0 +1,14 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: terraform-aws-alternat
+  description: "High availability implementation of AWS NAT instances."
+  annotations:
+    github.com/project-slug: GumGum-Inc/terraform-aws-alternat
+    backstage.io/source-location: "url:https://github.com/GumGum-Inc/terraform-aws-alternat"
+  tags:
+    - hcl
+spec:
+  type: infrastructure
+  lifecycle: production
+  owner: "group:devops"
