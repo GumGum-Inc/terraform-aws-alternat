@@ -12,3 +12,4 @@ spec:
   type: infrastructure
   lifecycle: production
   owner: "group:devops"
+  system: "system:default/infrastructure-delivery-platform"
