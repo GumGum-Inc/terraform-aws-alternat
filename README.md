@@ -132,6 +132,12 @@ There are two ways to deploy alterNAT:
 
 Use this project directly, as provided, or draw inspiration from it and use only the parts you need. We cut [releases](https://github.com/chime/terraform-aws-alternat/releases) following the [Semantic Versioning](https://semver.org/) method. We recommend pinning to our tagged releases or using the short commit SHA if you decide to use this repo directly.
 
+### Additional private route tables
+
+For an additional private route table in an existing NAT AZ, add it to that AZ's `vpc_az_maps[*].route_table_ids` so alterNAT manages it on replacement and failover. Optionally set `additional_pod_nat_route_tables` to a map keyed by AZ, with `existing` and `additional` route-table IDs. The module creates an initial default route in each additional table using the existing table's NAT target. The additional tables must not already have a default route unless those routes have first been imported into Terraform state.
+
+Use `additional_pod_nat_ingress_cidrs` to add a separate NAT security-group ingress rule without replacing the existing CIDR rule. Set `additional_pod_nat_ingress_description` if a specific rule description is needed. Both inputs default to empty, so existing callers are unchanged. Verify the source routes, NAT health, failover, and peer connectivity before placing workloads in additional subnets.
+
 ### Building and Pushing the Container Image
 
 Build and push the container image using the [`Dockerfile`](Dockerfile).
